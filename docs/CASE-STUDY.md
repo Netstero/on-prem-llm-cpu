@@ -83,9 +83,13 @@ medians of 3 reps taken verbatim from each run's `results.csv`, and derived figu
 - Context **262,144** (256K native); tokenizer BPE, vocab **151,936**.
 - Quant **UD-Q4_K_XL** (Unsloth Dynamic; GGUF ftype `Q4_K - Medium`); model size **16.447 GiB**
   (4.627 bpw); **17,665,334,432 B** on disk (byte-exact to the HF LFS size). License **Apache-2.0**.
-- Sampling used: Qwen-recommended **`temperature=0.7, top_p=0.8, top_k=20, min_p=0, repeat_penalty=1.05`**,
-  no KV-cache quant. Each model is run at *its own* recommended sampling; sampling affects quality grading,
-  not the speed metrics (prefill/decode rates are sampling-independent).
+- Sampling: the server was set to Qwen's recommended **`temperature=0.7, top_p=0.8, top_k=20, min_p=0,
+  repeat_penalty=1.05`**, no KV-cache quant — **but a harness defect overrode it**. The request body
+  hard-codes `temperature=1.0, top_p=1.0, top_k=0, min_p=0`, which llama.cpp honors over the server flags,
+  so the Qwen runs **actually sampled at temp 1.0 / top_p 1.0 / top_k 0 / min_p 0** (`repeat_penalty 1.05`
+  did apply — it is absent from the body). Speed metrics are sampling-independent and unaffected; only
+  quality grading is — the summarization result was generated at temp 1.0 (§8, item 11). gpt-oss intended
+  exactly the body's values, so it is unaffected.
 
 ### 2.4 Engines (shared)
 - **mainline `llama.cpp`** — commit `6e14286ed` (`llama-server` build b9631). Built
@@ -298,8 +302,9 @@ decode 9.09 vs 9.20, prefill 25.66 vs 25.16, cold TTFT 696.59 vs 710.25 s — **
 
 Retrieval, reasoning, and code pass on both engines. **Summarization scored 3/8 figures (0.375)**
 identically across both engines and all reps — systematic (§8). Note that on the *same* task and grader
-gpt-oss scored 8/8 (§4.5), so the grader is functional; Qwen's 3/8 is consistent with Qwen omitting or
-reformatting figures (not disambiguated this run).
+gpt-oss scored 8/8 (§4.5), so the grader is functional. Two non-exclusive explanations for Qwen's 3/8
+remain (not disambiguated this run): this run sampled at temperature 1.0 rather than the intended 0.7
+(§2.3.2 / §8 item 11) — which plausibly hurts exact figure recall — and/or Qwen omits/reformats figures.
 
 ### 5.6 The "30k" cells are invalid (context overflow) — primary Qwen caveat
 The run used `--ctx-size 32768` (to mirror the gpt-oss study). The "30k" fixture tokenizes to **34,483
@@ -388,9 +393,10 @@ instrumented but used the same box, limits, and thread count.
    deep-context (64k/256k) measured. Harness gap: the flag set did not catch context overflow / silent
    truncation; add an overflow guard before any deep re-run.
 5. **Qwen summarization scored 0.375** on both engines (3/8 figures), systematically. The same grader
-   passed gpt-oss at 8/8, so it is functional; Qwen's result is consistent with omitted/reformatted
-   figures but was **not disambiguated** (raw summary not inspected this run). Affects only the
-   summarization quality verdict, not any speed metric.
+   passed gpt-oss at 8/8, so it is functional. Two non-exclusive causes, **not disambiguated**: this run
+   sampled at temperature 1.0 not the intended 0.7 (item 11 / §2.3.2), which plausibly hurts figure
+   recall; and/or Qwen omits/reformats figures (raw summary not inspected). Affects only the summarization
+   quality verdict, not any speed metric.
 6. **gpt-oss one recorded FAIL is a grader false-positive** (`qual_main_code` rep3): correct code, but a
    docstring containing "input" tripped the verifier's safety denylist. Effective code correctness 3/3;
    accepted as a known false-positive, verifier left unchanged (affects no performance figure).
@@ -401,6 +407,14 @@ instrumented but used the same box, limits, and thread count.
 9. **Effective memory bandwidth not directly measured**; only the 76.8 GB/s theoretical peak is stated.
 10. **One Qwen warm re-send and one gpt-oss warm re-send** edge cases noted in the per-model docs; neither
     affects cold results.
+11. **Qwen sampling override (harness defect, corrected post-run).** The payload generator hard-coded
+    `temperature 1.0, top_p 1.0, top_k 0, min_p 0` into every request body, which llama.cpp honors over the
+    server's `--temp 0.7 / top_p 0.8 / top_k 20` flags — so the Qwen runs sampled at 1.0, not 0.7
+    (`repeat_penalty 1.05`, absent from the body, did apply). Verified via the server's `/props`, the saved
+    request bodies, and a greedy probe (`temperature:0, top_k:1` → byte-identical output). **Speed metrics
+    are sampling-independent and unaffected;** only the summarization quality result is implicated (item 5).
+    gpt-oss is unaffected (its intended sampling equals the body's values). Generator since fixed to defer
+    to the server flags.
 
 ---
 

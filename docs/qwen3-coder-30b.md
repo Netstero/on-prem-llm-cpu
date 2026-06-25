@@ -63,11 +63,16 @@ CPU inference of this model class is **memory-bandwidth-bound** for token genera
 The on-disk size is byte-exact to the Hugging Face LFS size (`unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF`),
 verified at download.
 
-### 2.3 Sampling (Qwen-recommended)
-`temperature 0.7`, `top_p 0.8`, `top_k 20`, `min_p 0.0`, `repeat_penalty 1.05`. `--jinja` (chat template
-from the GGUF). These differ from the gpt-oss study (which used temp 1.0 / top_p 1.0 / no repeat penalty);
-each model is run at *its own* recommended settings. Sampling affects quality grading, not the
-speed metrics (prefill/decode rates are sampling-independent).
+### 2.3 Sampling — important correction
+The server was started with Qwen's recommended sampling (`temperature 0.7`, `top_p 0.8`, `top_k 20`,
+`min_p 0.0`, `repeat_penalty 1.05`, `--jinja`). **However, the benchmark requests did not use those
+values.** The payload generator hard-codes `temperature 1.0, top_p 1.0, top_k 0, min_p 0.0` into every
+request body, and llama.cpp lets request-body sampling override the server's CLI flags — so the Qwen runs
+**actually sampled at `temperature 1.0, top_p 1.0, top_k 0, min_p 0.0`** (with `repeat_penalty 1.05`, which
+was absent from the body and so kept its server value). This harness defect was found after the run (§6.4).
+**Impact is confined to quality grading — prefill/decode/TTFT are sampling-independent, so every speed
+figure in this report stands unchanged.** The summarization result (§4.4 / §6.2) was generated at
+temperature 1.0, not 0.7. (The live server, queried without body sampling, does use 0.7 — verified.)
 
 ### 2.4 Engines
 - **ik_llama.cpp** — commit `670a3f6` (built & verified 2026-06-14). Default engine.
@@ -208,11 +213,12 @@ an explicit overflow guard should precede any deep-context re-run.
 
 ### 6.2 Summarization task scored 0.375 on both engines
 The summarization grader checks for 8 specific figures in the model's summary. Qwen reproduced 3/8,
-identically across both engines and all 3 reps — i.e. systematic, not noise. Two explanations are
-consistent with the data and **were not disambiguated in this run**: (a) the grader's figure-matching was
-calibrated against gpt-oss output and Qwen formats/representations differ; or (b) Qwen genuinely omits
-figures from its summary. This affects only the summ quality verdict, not any speed metric. The other
-three quality tasks (needle, reason, code) pass on both engines.
+identically across both engines and all 3 reps — i.e. systematic, not noise. Three explanations are
+consistent with the data and **were not disambiguated in this run**: (a) this run sampled at temperature
+1.0 rather than the intended 0.7 (§2.3, §6.4) — higher temperature plausibly hurts exact figure recall;
+(b) the grader's figure-matching was calibrated against gpt-oss output and Qwen formats/represents figures
+differently; or (c) Qwen genuinely omits figures from its summary. This affects only the summ quality
+verdict, not any speed metric. The other three quality tasks (needle, reason, code) pass on both engines.
 
 ### 6.3 Other limitations
 - **Single-instance, batch=1** (`--parallel 1`): these are single-user latency/throughput numbers, not
@@ -222,6 +228,17 @@ three quality tasks (needle, reason, code) pass on both engines.
 - **Effective memory bandwidth not directly measured** (only the 76.8 GB/s theoretical peak is stated).
 - **Decode "short" vs "long"** differ in output length (64 vs 2000 tokens); the long cells reflect
   sustained decode, the short cells include relatively more fixed overhead.
+
+### 6.4 Sampling override (harness defect, corrected post-run)
+The benchmark payload generator hard-codes sampling (`temperature 1.0, top_p 1.0, top_k 0, min_p 0.0`)
+into every request body. llama.cpp honors request-body sampling over the server's CLI flags, so the Qwen
+runs sampled at those values rather than the intended `0.7 / 0.8 / 20` set on the server; only
+`repeat_penalty 1.05` (absent from the body) applied. Verified three ways: the server's `/props` reports
+the 0.7 defaults; the saved request bodies contain 1.0; and a greedy probe (`temperature:0, top_k:1` in
+the body) returns byte-identical output while no-body-sampling requests vary — proving the body overrides
+the server. gpt-oss is unaffected (its intended sampling equals the body's values). Speed metrics are
+sampling-independent and unchanged. The generator has since been fixed to defer to the server flags for
+future runs.
 
 ---
 

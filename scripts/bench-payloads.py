@@ -89,9 +89,12 @@ def code(max_tokens):
 
 
 def _payload(system, user, max_tokens):
+    # Sampling (temperature/top_p/top_k/min_p) is intentionally NOT set in the request body so the
+    # server's per-model CLI flags govern. Earlier versions hard-coded temperature=1.0 etc. here, which
+    # llama.cpp honors OVER the server flags — that silently overrode per-model sampling (see RESULTS docs).
     return {
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "max_tokens": max_tokens, "temperature": 1.0, "top_p": 1.0, "top_k": 0, "min_p": 0.0,
+        "max_tokens": max_tokens,
     }
 
 
