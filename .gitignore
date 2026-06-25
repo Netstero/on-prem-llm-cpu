@@ -1,0 +1,21 @@
+# Real config (copy config.env.example → config.env and fill in your values)
+scripts/config.env
+
+# Secrets / access tooling — must never be committed
+**/secrets*
+**/*secret*
+**/.askpass*
+px
+*.key
+*.pem
+id_*
+
+# Python
+__pycache__/
+*.pyc
+
+# Local run artifacts (the committed results/<run>/results.csv files are kept)
+results/**/raw/
+results/**/server.log
+results/**/suite.out
+*.wall
